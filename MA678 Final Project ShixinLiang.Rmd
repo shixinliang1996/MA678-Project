@@ -1,0 +1,591 @@
+---
+title: "MA678 Project Report"
+author: "Shixin Liang"
+date: "11/29/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)                
+library(ggplot2)              
+library(esquisse)             
+library(tidyr)
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+library(magrittr)
+library("plotly")
+library(arm)
+library(lme4)
+require(lattice)
+
+knitr::opts_chunk$set(echo = FALSE)
+```
+  
+# Introduction  
+## Background  
+Airbnb offers travellers someone’s home as a place to stay instead of a hotel. And people can rent out extra space in their own home through Airbnb and make money for allowing a guest to stay the night. For travellers, they choose Airbnb because of many reasons: to shorten traveling time, to become part of local life or to experience individual room style. But for Airbnb hosts, their primary goal must be to earn money. Therefore, it is important to find a way to set a reasonable price for Airbnb properties and spare rooms. 
+
+## Goal  
+This project aims to fit a suitable model which can provide a suggested price for an Airbnb property or spare room according to its attributes by using Airbnb Boston data. Then the model can be used as a basic pricing tool for Airbnb hosts.  
+  
+## Dataset 
+The Airbnb Boston dataset can be downloaded from the website: Airbnb Data Collection. (http://tomslee.net/airbnb-data-collection-get-the-data) The data is from July, 2016 to July, 2017. There are 12 csv files and I combined them into one data frame. The data contains 12 variables: room ID, host ID, room type, neighborhood, the number of reviews, the average rating, the number of guests a listing can accommodate, the number of bedrooms, the price for a night stay, the minimum stay, latitude and longitude and the date and time that the values were read. By looking through the data, we can see that there is no bathrooms, country, borough data for all tables. And for data 2017_1,2,3,4,5,6,7, there is no minstay data. Therefore, I would like to ignore this four variables.  
+  
+```{r data cleaning}
+# Read the data
+data_2016_7 <- read.csv("tomslee_airbnb_boston_0489_2016-07-16.csv", header = TRUE)
+data_2016_8 <- read.csv("tomslee_airbnb_boston_0524_2016-08-19.csv", header = TRUE)
+data_2016_9 <- read.csv("tomslee_airbnb_boston_0566_2016-09-16.csv", header = TRUE)
+data_2016_10 <- read.csv("tomslee_airbnb_boston_0610_2016-10-18.csv", header = TRUE)
+data_2016_11 <- read.csv("tomslee_airbnb_boston_0649_2016-11-21.csv", header = TRUE)
+data_2017_1 <- read.csv("tomslee_airbnb_boston_0779_2017-01-14.csv", header = TRUE)
+data_2017_2 <- read.csv("tomslee_airbnb_boston_0858_2017-02-16.csv", header = TRUE)
+data_2017_3 <- read.csv("tomslee_airbnb_boston_0931_2017-03-12.csv", header = TRUE)
+data_2017_4 <- read.csv("tomslee_airbnb_boston_1043_2017-04-08.csv", header = TRUE)
+data_2017_5 <- read.csv("tomslee_airbnb_boston_1187_2017-05-05.csv", header = TRUE)
+data_2017_6 <- read.csv("tomslee_airbnb_boston_1309_2017-06-10.csv", header = TRUE)
+data_2017_7 <- read.csv("tomslee_airbnb_boston_1429_2017-07-10.csv", header = TRUE)
+
+# Delete redundant variables in the three latest tables
+data_2017_5 <- data_2017_5[, -c(2,5,6,13,16,20)]
+data_2017_6 <- data_2017_6[, -c(2,5,6,13,16,20)]
+data_2017_7 <- data_2017_7[, -c(2,5,6,13,16,20)]
+
+# Reorder by column index to make them consist with the other tables
+data_2017_5 <- data_2017_5[c(1,2,3,4,5,6,7,8,9,10,11,13,14,12)]
+data_2017_6 <- data_2017_6[c(1,2,3,4,5,6,7,8,9,10,11,13,14,12)]
+data_2017_7 <- data_2017_7[c(1,2,3,4,5,6,7,8,9,10,11,13,14,12)]
+
+# Combine the 12 csv files
+boston_airbnb <- rbind(data_2016_7, data_2016_8, data_2016_9, data_2016_10, data_2016_11, data_2017_1, data_2017_2, data_2017_3, data_2017_4, data_2017_5, data_2017_6, data_2017_7)
+
+# Delete borough and minstay column
+boston_airbnb <- boston_airbnb[, -c(4,11)]
+
+# Delete rows with NA value
+boston_airbnb <- na.omit(boston_airbnb)
+
+# Fix last_modified into date data
+boston_airbnb <- boston_airbnb %>% 
+  separate(last_modified, into = c("date", "time"), sep = " ")
+boston_airbnb <- boston_airbnb[, -13]
+boston_airbnb$date <- as.Date(boston_airbnb$date)
+```
+  
+# Data Cleaning  
+```{r}
+# price 
+ggplot(boston_airbnb, aes(x=room_id, y=price)) + geom_point() +
+  labs(x = "Room ID", y = "Price") 
+
+filter(boston_airbnb, boston_airbnb$price==10000)
+filter(boston_airbnb, boston_airbnb$price==4000)
+filter(boston_airbnb, boston_airbnb$price==3995)
+filter(boston_airbnb, boston_airbnb$price==3000)
+```
+
+I would like to delete them because their price are too high. It may affect the regression results.  
+```{r}
+boston_airbnb <- filter(boston_airbnb, boston_airbnb$price!=10000)
+boston_airbnb <- filter(boston_airbnb, boston_airbnb$price!=4000)
+boston_airbnb <- filter(boston_airbnb, boston_airbnb$price!=3995)
+boston_airbnb <- filter(boston_airbnb, boston_airbnb$price!=3000)
+```
+
+```{r}
+# reviews
+ggplot(boston_airbnb, aes(x=room_id, y=reviews)) + geom_point() +
+  labs(x = "Room ID", y = "Number of reviews") 
+
+# overall_satisfaction
+ggplot(boston_airbnb, aes(x=room_id, y=overall_satisfaction)) + geom_point() +
+  labs(x = "Room ID", y = "Number of reviews") 
+
+filter(boston_airbnb, boston_airbnb$overall_satisfaction==1.0)
+```
+I will keep these rating of 1.0 points because they are reasonable.  
+
+```{r}
+# accommodates
+ggplot(boston_airbnb, aes(x=room_id, y=accommodates)) + geom_point() +
+  labs(x = "Room ID", y = "Number of accommodates") 
+
+# bedrooms
+ggplot(boston_airbnb, aes(x=room_id, y=bedrooms)) + geom_point() +
+  labs(x = "Room ID", y = "Number of bedrooms") 
+
+```
+  
+# Exploratory Data Analysis  
+## Neighborhood  
+```{r}
+# neighborhood vs average price
+avg_price_neighborhood <- aggregate(boston_airbnb[, 9], list(boston_airbnb$neighborhood), mean)
+
+ggplot(data = avg_price_neighborhood, aes(x = Group.1, y = x, fill = Group.1)) + 
+  geom_bar(stat="identity") +
+  scale_fill_viridis_d(option = "plasma") + 
+  theme_minimal() + 
+  labs(x = "Neighborhood", y = "Average Price") + 
+  ggtitle("Neighborhood vs Average Price") + 
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+We can see that the average price varies a lot from different neighborhood in Boston. It means that the data can be grouped in neighborhood, and there are 25 subregions in the neighborhood variable.  
+  
+## Accommodates vs Number of Bedrooms  
+```{r}
+# accommodates vs bedrooms 
+ggplot(boston_airbnb, mapping = aes(x = bedrooms, y = accommodates)) +
+  geom_point() + 
+  theme_minimal() + 
+  labs(x = "Number of Bedrooms", y = "Accommodates") + 
+  ggtitle("Number of Bedrooms vs Accommodates") 
+```
+There is a positive relationship between accommodates and the number of Bedrooms. When the number of Bedrooms is larger, usually the accommodates is larger.  
+  
+## Overall Satisfaction vs Average Price
+```{r}
+# overall_satisfaction vs average price
+avg_rating_price <- aggregate(boston_airbnb[, 9], list(boston_airbnb$overall_satisfaction), mean)
+
+ggplot(data = avg_rating_price, aes(x = Group.1, y = x, fill = Group.1)) +  
+  geom_bar(stat="identity") +
+  scale_fill_viridis_c(option = "plasma") + 
+  theme_minimal() + 
+  labs(x = "Rating", y = "Average Number of Reviews") + 
+  ggtitle("Rating vs Average Price") 
+```  
+We can see that listings with rating 0 have the highest average price. It makes sense because no one will book a room with a too expensive price. And for listings with rating higher than 2.5, higher rating means higher price.  
+  
+   
+# Model Building 
+After EDA, I chose these following variables to do regression. The dependent variable is price. The independent variables are room type, neighborhood, reviews, overall satisfaction, accommodates and bedrooms. For the variables accommodates and room type, an interaction is considered. I tried both linear regression models and multilevel linear regression models. 
+  
+  
+## Linear Regression Model  
+  
+```{r}   
+lm_fit1 <- lm(price ~ room_type + neighborhood + reviews + overall_satisfaction + accommodates*bedrooms, data = boston_airbnb)
+summary(lm_fit1)
+```
+The p-value shows that most of the coeffcients are statistically significant except some levels of the neighborhood variable. Therefore, I also checked a model without the neighborhood variable.  
+  
+```{r}
+lm_fit2 <- lm(price ~ room_type + reviews + overall_satisfaction + accommodates*bedrooms, data = boston_airbnb)
+summary(lm_fit2)
+```
+The p-value looks better and all the coefficients are statistically significant. However, its R-square turns smaller. 
+Private room has 96.91929 lower weighted price than the Entire home/apt. 
+Shared room has 109.57187 lower weighted price than the price of Entire home/apt. 
+When one review increases, keeping other variables the same, price will decrease by 0.14037. 
+When one unit increases in overall satisfaction, keeping other variables the same, price will decrease by 4.08940. 
+When accommodates increases by one, keeping other variables the same, price will increase by 5.23598 + 1.66723 = 6.90321. 
+When the number of bedrooms increases by one, keeping other variables the same, price will increase by 31.44194 + 1.66723 = 33.10917. 
+  
+  
+## Multilevel Linear Regression Model 
+### Random Intercept  
+I fitted a model to allow varying intercepts for neighborhood. 
+  
+```{r}
+lmer_fit1 <- lmer(price ~ room_type + reviews + overall_satisfaction + accommodates*bedrooms + (1|neighborhood), data = boston_airbnb)
+display(lmer_fit1)
+```  
+All of the absolute t value of the coefficients are larger than 1.96, which means the coefficients are statistically significant at 95% level. 
+Private room has 55.02 lower weighted price than the Entire home/apt. 
+Shared room has 80.98 lower weighted price than the price of Entire home/apt. 
+When one review increases, keeping other variables the same, price will decrease by 0.08. 
+When one unit increases in overall satisfaction, keeping other variables the same, price will decrease by 4.00. 
+When accommodates increases by one, keeping other variables the same, price will increase by 6.8 ($4.96 + 1.84 = 6.8$).
+When the number of bedrooms increases by one, keeping other variables the same, price will increase by 41.75 ($39.91 + 1.84 = 41.75$). 
+The variance among different neighborhoods are 48.97. The within-neighborhood variance is 89.55.   
+
+It is strange that the coefficient of overall satisfaction is negative, which means higher rating lower price. It is against common sense. Therefore, I would like to expand this model to allow varying slopes for overall satisfaction. 
+  
+  
+### Random Intercept And Random Slope  
+I fitted a model to allow varying intercepts for neighborhood and varying slopes for overall satisfaction.  
+  
+```{r}
+lmer_fit2 <- lmer(price ~ room_type + reviews + accommodates*bedrooms + (1 + overall_satisfaction|neighborhood), data = boston_airbnb)
+display(lmer_fit2)
+```
+All of the coefficients are statistically significant. The coefficients are similar to the previous model.  
+Private room has 54.59 lower weighted price than the Entire home/apt. 
+Shared room has 79.66 lower weighted price than the price of Entire home/apt. 
+When one review increases, keeping other variables the same, price will decrease by 0.10. 
+When accommodates increases by one, keeping other variables the same, price will increase by 6.59 ($4.77 + 1.82 = 6.59$). 
+When the number of bedrooms increases by one, keeping other variables the same, price will increase by 42.53 ($40.71 + 1.82 = 42.53$). 
+The variance among different neighborhoods are 70.85. The within-neighborhood variance is 88.72.
+The slope of overall satisfaction is 9.61, and there is correlation with intercept of -0.79. 
+
+Now, the slope of overall satisfaction is positive. It is much more reasonable than the last model.  
+  
+
+## Model Selection
+```{r}
+aic_value <- c(AIC(lm_fit1), AIC(lm_fit2), AIC(lmer_fit1), AIC(lmer_fit2))
+bic_value <- c(BIC(lm_fit1), BIC(lm_fit2), BIC(lmer_fit1), BIC(lmer_fit2))
+model_name <- c("lm_fit1", "lm_fit2", "lmer_fit1", "lmer_fit2")
+aic_bic <- data.frame(Model = model_name, AIC = aic_value, BIC = bic_value)
+knitr::kable(aic_bic)
+```  
+The model with random intercept and random slope (lmer_fit2) is a better model comparing to the other three models because it has the smallest AIC and BIC.  
+  
+  
+## Model Checking   
+I plotted residual plot, normal Q-Q plot and binned residual plot to check the residual of the model I chose (lmer_fit2).  
+
+```{r}
+# residual plot  
+plot(lmer_fit2)
+```
+The residual plot shows a non-random pattern. It means the assumption that the relationship between price and other variables is linear is not reasonable. And the variances of the error terms may not be equal.  
+  
+```{r}
+# Q-Q plot  
+qqnorm(resid(lmer_fit2))
+```
+The points in the normal Q-Q plot for the residuals do not rest on a line. It means the model does not meet the normality assumptions.  
+  
+```{r}
+# binned residual plot  
+binnedplot(fitted(lmer_fit2), resid(lmer_fit2))
+```  
+The binned residual plot shows that many points rest on the left. And there are some points falling outside of the 2 standard-error bounds.    
+
+## Model Improvement  
+The residual plots show that the model we chose (lmer_fit2) do not fit the data well. To improve the model, I transformed the outcome variable by logging the price variable.  
+  
+```{r}
+boston_airbnb_log <- boston_airbnb
+boston_airbnb_log$log.price <- log(boston_airbnb_log$price)
+boston_airbnb_log <- filter(boston_airbnb_log, boston_airbnb_log$price > 0)
+
+lmer_fit3 <- lmer(log.price ~ room_type + reviews + accommodates*bedrooms + (1 + overall_satisfaction|neighborhood), data = boston_airbnb_log)
+display(lmer_fit3)
+random_effects <- ranef(lmer_fit3)$neighborhood
+knitr::kable(random_effects)
+```
+
+```{r, include=FALSE}
+str(rr1 <- ranef(lmer_fit3))
+str(dd <- as.data.frame(rr1))
+```
+
+```{r}
+if (require(ggplot2)) {
+    ggplot(dd, aes(y=grp,x=condval)) +
+        geom_point() + facet_wrap(~term,scales="free_x") +
+        geom_errorbarh(aes(xmin=condval -2*condsd,
+                           xmax=condval +2*condsd), height=0)
+}
+```  
+All of the coefficients are statistically significant. 
+Private room has 40% ($exp(-0.51) = 0.6004956$) lower weighted price than the Entire home/apt. 
+Shared room has 55% ($exp(-0.80) = 0.449329$) lower weighted price than the price of Entire home/apt. 
+The coefficient of reviews is zero, this variable can be ignored.  
+When accommodates increases by one, keeping other variables the same, price will increase by 5% ($exp(0.06-0.01) = 1.051271$). 
+When the number of bedrooms increases by one, keeping other variables the same, price will increase by 22% ($exp(0.21-0.01) = 1.221403$). 
+The variance among different neighborhoods are 0.33. The within-neighborhood variance is 0.41.  
+The slope of overall satisfaction is 0.03, and there is correlation with intercept of -0.66. 
+The random effects are shown on the table and the plot.  
+  
+  
+```{r}
+aic_value <- c(AIC(lm_fit1), AIC(lm_fit2), AIC(lmer_fit1), AIC(lmer_fit2), AIC(lmer_fit3))
+bic_value <- c(BIC(lm_fit1), BIC(lm_fit2), BIC(lmer_fit1), BIC(lmer_fit2), BIC(lmer_fit3))
+model_name <- c("lm_fit1", "lm_fit2", "lmer_fit1", "lmer_fit2", "lmer_fit3")
+aic_bic <- data.frame(Model = model_name, AIC = aic_value, BIC = bic_value)
+knitr::kable(aic_bic)
+```  
+I checked the AIC and BIC of the improved model. We can see that its AIC and BIC are much smaller than other models.  
+   
+```{r}
+plot(lmer_fit3)
+qqnorm(resid(lmer_fit3))
+binnedplot(fitted(lmer_fit3), resid(lmer_fit3))
+``` 
+I plotted residual plot, normal Q-Q plot and binned residual plot again to check the residual of the improved model (lmer_fit3). The residual plot and normal Q-Q plot look much better. There is no pattern in the residual plot and most of the points in the normal Q-Q plot for the residuals rest on a line. For the binned residual plot, the residuals now form a "horizontal band" around the 0 line. However, more points fall outside of the 2 standard-error bounds. 
+  
+  
+# Discussion   
+Overall, the model with varying intercepts for neighborhood and varying slopes for overall satisfaction and transformed by logging the price variable (lmer_fit3) is my final choice. From the coefficients, we can see that the most important variable is room type. The second important variable is the number of bedroom. The neighborhood variable and the overall satisfaction variable also play important roles in the model.  
+  
+The binned residual plot shows there are still problems in this models because there are many points falling outside of the 2 standard-error bounds. It may because there are still outliers in the data. A better way to do data cleaning is needed in the future. The number of reviews variable worths a deeper study. By now, the coefficient of the number of reviews variable is zero. There must be some relationships between the number of positive reviews and negative reviews. For future direction, I could collect the text data of the reviews and do sentiment analysis of the reviews text. Then I could use the number of positive reviews and negative reviews as new predictors. 
+  
+  
+# References  
+"Airbnb Data Collection: Get the Data." n.d. http://tomslee.net/airbnb-data-collection-get-the-data.  
+
+"Airbnb." 2019. https://en.wikipedia.org/w/index.php?title=Airbnb&action=edit.    
+  
+  
+
+  
+  
+# Appendix: Additional Graphs  
+
+```{r room_type, include = FALSE}
+# Distribution of room_type
+ggplot(boston_airbnb) +
+ aes(x = room_type, fill = room_type) +
+ geom_bar() +
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") + 
+  labs(x = "Room Type", y = "Frequency") + 
+  ggtitle("Distribution of Room Type") 
+```
+We can see that most rooms are entire home/apartment and private room. Only a few of the rooms are shared room. 
+  
+```{r}
+# room_type vs price
+ggplot(boston_airbnb, mapping = aes(x = room_type, y = price, fill = room_type)) +
+  geom_boxplot(mapping = aes(group = room_type)) +
+  scale_fill_viridis_d(option = "plasma") + 
+  theme_minimal() + 
+  labs(x = "Room Type", y = "Price") + 
+  ggtitle("Boxplot of Room Type vs Price") 
+```
+The average price of the three room types are close, but for the entire home/apartment type, there exis points with relatively high price. 
+
+```{r}
+# room_type vs average price
+avg_price_roomtype <- aggregate(boston_airbnb[, 9], list(boston_airbnb$room_type), mean)
+
+ggplot(data = avg_price_roomtype, aes(x = Group.1, y = x, fill = Group.1)) + 
+  geom_bar(stat="identity") +
+  scale_fill_viridis_d(option = "plasma") + 
+  theme_minimal() + 
+  labs(x = "Room Type", y = "Average Price") + 
+  ggtitle("Room Type vs Average Price") 
+```
+Entire room/apartment' average price is much higher than the other two types.  
+  
+```{r neighborhood, include = FALSE}
+# Distribution of neighborhood
+ggplot(boston_airbnb) +
+ aes(x = neighborhood, fill = neighborhood) +
+ geom_bar() +
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") + 
+  labs(x = "Neighborhood", y = "Frequency") + 
+  ggtitle("Distribution of Neighborhood") + 
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+# neighborhood vs price
+ggplot(boston_airbnb, mapping = aes(x = neighborhood, y = price, fill = neighborhood)) +
+  geom_boxplot(mapping = aes(group = neighborhood)) +
+  scale_fill_viridis_d(option = "plasma") + 
+  theme_minimal() + 
+  labs(x = "Neighborhood", y = "Price") + 
+  ggtitle("Boxplot of Neighborhood vs Price") + 
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+  
+```{r reviews, include = FALSE}
+# Distribution of reviews
+ggplot(boston_airbnb) +
+ aes(x = reviews, fill = reviews) +
+ geom_bar() +
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") + 
+  labs(x = "Number of Reviews", y = "Frequency") + 
+  ggtitle("Distribution of Number of Reviews") 
+
+summary(boston_airbnb$reviews)
+```
+Many listings have zero review. And the number of reviews varies a lot. 
+  
+```{r}
+# reviews vs price
+ggplot(boston_airbnb, mapping = aes(x = reviews, y = price)) +
+  geom_point()+
+  geom_smooth() + 
+  theme_minimal() + 
+  labs(x = "Number of Reviews", y = "Price") + 
+  ggtitle("Number of Reviews vs Price") 
+```
+It shows more revies appear when the price is lower.  
+  
+```{r}
+# reviews vs price
+ggplot(boston_airbnb, mapping = aes(x = log(reviews), y = price)) +
+  geom_point() +
+  geom_smooth() + 
+  theme_minimal() + 
+  labs(x = "Log of Number of Reviews", y = "Price") + 
+  ggtitle("Log of Number of Reviews vs Price") 
+```
+  
+```{r overall_satisfaction, include = FALSE}
+# Distribution of overall_satisfaction
+ggplot(boston_airbnb) +
+ aes(x = overall_satisfaction, fill = factor(overall_satisfaction)) +
+ geom_bar() +
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") + 
+  labs(x = "Rating", y = "Frequency") + 
+  ggtitle("Distribution of Rating") 
+
+summary(boston_airbnb$overall_satisfaction)
+```
+The rating is polarize. Mosting are 0 or 4.5~5.   
+  
+```{r}
+# Distribution of reviews for listings with rating 0
+zero_rating <- filter(boston_airbnb, boston_airbnb$overall_satisfaction==0)
+ggplot(zero_rating) +
+ aes(x = reviews, fill = reviews) +
+ geom_bar() +
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") + 
+  labs(x = "Number of Reviews", y = "Frequency") + 
+  ggtitle("Distribution of Number of Reviews for listings with rating 0") 
+```
+For those listings with 0 rating, most of them have 0 reviews, which means very likely that no one have been there. It make sense the rating is low.  
+  
+```{r}
+# overall_satisfaction vs price
+ggplot(boston_airbnb, mapping = aes(x = overall_satisfaction, y = price)) +
+  geom_point() +
+  geom_smooth() + 
+  theme_minimal() + 
+  labs(x = "Rating", y = "Price") + 
+  ggtitle("Rating vs Price")  
+```
+If we ignore the zero rating, the rating gets higher when the price turns higher. 
+  
+```{r}
+# overall_satisfaction vs reviews
+ggplot(boston_airbnb, mapping = aes(x = overall_satisfaction, y = reviews)) +
+  geom_point() +
+  theme_minimal() + 
+  labs(x = "Rating", y = "Number of Reviews") + 
+  ggtitle("Rating vs Number of Reviews")   
+
+# overall_satisfaction vs average reviews
+avg_rating_reviews <- aggregate(boston_airbnb[, 5], list(boston_airbnb$overall_satisfaction), mean)
+
+ggplot(data = avg_rating_reviews, aes(x = Group.1, y = x, fill = Group.1)) +  
+  geom_bar(stat="identity") +
+  scale_fill_viridis_c(option = "plasma") + 
+  theme_minimal() + 
+  labs(x = "Rating", y = "Average Number of Reviews") + 
+  ggtitle("Rating vs Average Number of Reviews") 
+```
+From the result, we can see that listings with rating 4.5 have highest number of reviews. It makes sense because listings with rating 5 many be expensive then fewer people will choose them. 
+  
+```{r accommodates, include = FALSE}
+# Distribution of accommodates
+ggplot(boston_airbnb) +
+ aes(x = accommodates, fill = factor(accommodates)) +
+ geom_bar() +
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") + 
+  labs(x = "Accommodates", y = "Frequency") + 
+  ggtitle("Distribution of Accommodates") 
+
+summary(boston_airbnb$accommodates)
+```
+Listings with two accommodates are most common in Boston.  
+  
+```{r}
+# accommodates vs room_type 
+ggplot(boston_airbnb) +
+ aes(x = accommodates, fill = room_type) +
+ geom_bar(position = "fill") + 
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") + 
+  labs(x = "Accommodates", y = "Room Type") + 
+  ggtitle("Accommodates vs Room Type") 
+```
+There is relationship between accommodates and room type. Most private rooms and shared rooms accept 1 to 2 accommodates. A listing with accommodates larger than five is most possibly an entire home or apartment.  
+  
+```{r}
+# accommodates vs price
+ggplot(boston_airbnb, mapping = aes(x = accommodates, y = price)) +
+  geom_point()+
+  geom_smooth() + 
+  theme_minimal() + 
+  labs(x = "Accommodates", y = "Price") + 
+  ggtitle("Accommodates vs Price") 
+```
+It seems when the number of accommodates grows, the price grows a little.  
+   
+```{r bedrooms, include = FALSE}
+# Distribution of bedrooms
+ggplot(boston_airbnb) +
+ aes(x = bedrooms, fill = factor(bedrooms)) +
+ geom_bar() +
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") + 
+  labs(x = "Number of Bedrooms", y = "Frequency") + 
+  ggtitle("Distribution of Bedrooms") 
+
+summary(boston_airbnb$bedrooms)
+```
+Listings with 1 rooms are most common in Boston.  
+  
+```{r}
+# bedrooms vs room_type 
+ggplot(boston_airbnb) +
+ aes(x = bedrooms, fill = room_type) +
+ geom_bar(position = "fill") + 
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") + 
+  labs(x = "Number of Bedrooms", y = "Room Type") + 
+  ggtitle("Number of Bedrooms vs Room Type") 
+```
+There is relationship between number of Bedrooms and room type. 
+  
+```{r}
+# bedrooms vs price
+ggplot(boston_airbnb, mapping = aes(x = bedrooms, y = price)) +
+  geom_point() +
+  theme_minimal() + 
+  labs(x = "Number of Bedrooms", y = "Price") + 
+  ggtitle("Number of Bedrooms vs Price") 
+```   
+  
+```{r date, include = FALSE}
+# date vs price
+ggplot(boston_airbnb, mapping = aes(x = date, y = price))+
+  geom_point() +
+  geom_smooth() + 
+  theme_minimal() + 
+  labs(x = "Date", y = "Price") + 
+  ggtitle("Date vs Price") 
+```
+After Jan, 2017, some listings with higher price appeared. And the price is a little bit rising. 
+  
+```{r}
+# date vs average price
+avg_price_date <- aggregate(boston_airbnb[, 9], list(boston_airbnb$date), mean)
+
+ggplot(data = avg_price_date, aes(x = Group.1, y = x, fill = factor(Group.1))) + 
+  geom_point() +
+  theme_minimal() + 
+  labs(x = "Date", y = "Average Price") + 
+  ggtitle("Date vs Average Price") 
+#The data in June, 2017 is weird. 
+
+# Fix June, 2017 data
+price_2017_6 <- filter(boston_airbnb, boston_airbnb$date=="2017-06-10"|boston_airbnb$date=="2017-06-11")
+#After I fixed the weird data in Hune, 2017, the average price seem relatively stable during July, 2016 to July, 2017. 
+
+avg_price_date <- avg_price_date[-11,]
+avg_price_date$x[10] <- mean(price_2017_6$price)
+
+knitr::kable(avg_price_date)
+
+ggplot(data = avg_price_date, aes(x = Group.1, y = x, fill = factor(Group.1))) +
+  geom_point() +
+  theme_minimal() +
+  labs(x = "Date", y = "Average Price") +
+  ggtitle("New Date vs Average Price") +
+  labs(caption = "Figure 20")
+```   
+The price keep relatively stable over the time period between July, 2016 to July, 2017.  
+  
